@@ -39,16 +39,21 @@ class Ex {
 ```
 However, given the current specification, the afore-mentioned work-around will no longer work. There is no feasible means of having Proxy and private fields as defined in proposal-class-fields work together without modifying the semantics of Proxy.
 
+## Syntax
+
+This proposal does not yet offer a unique syntax. While the author has a particular preference for his own proposal-class-members syntax, it is recognized that TC39 has settled on the class-fields syntax. Since this isn't a point of contention for this proposal, all example logic will be presented using class-fields syntax.
+
 ## Semantics
 
 * Function Environment Records have a new field:
   > | Field Name | Value | Meaning |
   > |:-|:-|:-|
   > | \[\[ClassObject]] | Object \| **undefined** | If the associated function is a lexically defined member of a class, \[\[ClassObject]] is the constructor of the class containing the definition of this function. The default value for \[\[ClassObject]] is **undefined**. |
-* ECMAScript Function Objects have a new internal slot:
+* ECMAScript Function Objects have 2 new internal slot:
   > | Interanl Slot | Type | Description |
   > |:-|:-|:-|
   > | \[\[ClassObject]] | Object \| **undefined** | If the function is a lexically defined member of a class, this object is assigned the constructor of that class. |
+  > | \[\[Signature]] | Symbol \| **undefined** | If the function is a class constructor function, this slot is assigned a new Symbol to be used as the unique key for unlocking access to the private members of an instance of the class.|
 * Symbol has a new non-configurable, non-writable property
   > | Field Name | Value | Meaning |
   > |:-|:-|:-|
@@ -56,7 +61,8 @@ However, given the current specification, the afore-mentioned work-around will n
 * A new exotic object _PrivateStore_ to contain the private data
 * During ClassDefinitionEvaluation, where _C_ is the class constructor
   * _C_ is assigned to the \[\[ClassObject]] of each method
-  * _C_ is assigned a non-writable, non-configurable, non-enumerable property named Symbol.privateKey with value Symbol()
+  * _C_ is assigned a non-writable, non-configurable, non-enumerable property named Symbol.privateKey with a new Symbol value
+  * _C_.\[\[Signature]] is assigned a new Symbol value
 * During NewFunctionEnvironment, where _F_ is the function being run
   * _F_.\[\[ClassObject]] is copied from the function object to _envrec_.\[\[ClassObject]]
 * During Construct, where _inst_ is the new instance object
@@ -69,3 +75,53 @@ However, given the current specification, the afore-mentioned work-around will n
 * When attempting to access a private property _field_ in any other scenario
   * return {}['field']
 
+The _PrivateStore_ class behaves as though it was defined as such:
+
+```js
+let PrivateStore = (() => {
+  return class PrivateStore {
+    constructor(lock, pvt) {
+      return new Proxy(pvt, new Proxy({}, {
+        data: {
+          defaults: { //All other defaults are false
+            get: void 0,
+            getPrototypeOf: null,
+            getOwnPropertySymbols: [],
+            getOwnPropertyDescriptor: void 0,
+            isExtensible: true,
+            ownKeys: [],
+            apply: void 0
+          },
+          enabled: false
+        },
+        get(target, prop, receiver) {
+          let dflt = (prop in this.data.defaults) ? this.data.defaults[prop] : false;
+          let condition = this.data.enabled;
+          let self = this;
+
+          return function(...args) {
+            let retval = dflt;
+            let key = args[1];
+
+            if ((key === lock) && (prop == "set")) {
+              self.data.enabled = args[2];
+              retval = true;
+            }
+            else {
+              if (["get", "has", "set"].includes(prop))
+                condition = condition || (key === lock);
+
+              if (condition)
+                retval = Reflect[prop](...args);
+            }
+
+            return retval;          
+          }
+        }
+      }));
+    }
+  };
+})();
+```
+
+The `lock` parameter specifies the special key that the object will use to signal the enabling and disabling of access to the stored data. By default, access to the data is disabled. The property at this key is a boolean that cannot be read but can always be written.
