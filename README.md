@@ -66,21 +66,41 @@ This proposal does not yet offer a unique syntax. While the author has a particu
 * During NewFunctionEnvironment, where _F_ is the function being run
   * _F_.\[\[ClassObject]] is copied from the function object to _envrec_.\[\[ClassObject]]
 * During Construct, where _inst_ is the new instance object
-  * _inst_\[envrec.\[\[ClassObject]]\[Symbol.privateKey]] is assigned to a new _PrivateStore_ _P_
-  * Each private property of the target class is initialized onto _P_
+  * Let _cls_ be _envrec_.\[\[ClassObject]]
+  * Let _sig_ be _cls_.\[\[Signature]]
+  * Let _key_ be _cls_\[Symbol.privateKey]
+  * Let _pd_ be _inst_\[_key_]
+  * _pd_ is assigned to the return value of new _PrivateStore_(_key_, {})
+  * Each private property of the target class is initialized onto _pd_
 * When getting a private property from instance _inst_ in a member function with either `inst.#field` or `inst[#'field']`
-  * Let _pd_ be _inst_\[envrec.\[\[ClassObject]]\[Symbol.privateKey]]
+  * Let _cls_ be _envrec_.\[\[ClassObject]]
+  * Let _sig_ be _envrec_.\[\[Signature]]
+  * Let _key_ be _cls_\[Symbol.privateKey]
+  * Let _pd_ be _inst_\[_key_]
   * Assert(_pd_)
-  * return _pd_['field']
-* When attempting to access a private property _field_ in any other scenario
-  * return {}['field']
+  * Assign true to _pd_[_sig_]
+  * Let _rval_ be _pd_['field']
+  * Assign false to _pd_[_sig_]
+  * Return _rval_
+* When setting a private property from instance _inst_ in a member function with either `inst.#field = val` or `inst[#'field']`
+  * Let _cls_ be _envrec_.\[\[ClassObject]]
+  * Let _sig_ be _envrec_.\[\[Signature]]
+  * Let _key_ be _cls_\[Symbol.privateKey]
+  * Let _pd_ be _inst_\[_key_]
+  * Assert(_pd_)
+  * Assign true to _pd_[_sig_]
+  * Assign _val_ to _pd_['field']
+  * Assign false to _pd_[_sig_]
+* When attempting to access a private property _field_ from _inst_ in any other scenario
+  * Lat _access_ be the invariant being called
+  * Return Reflect[_access_]({}, 'field', ...)
 
 The _PrivateStore_ class behaves as though it was defined as such:
 
 ```js
 let PrivateStore = (() => {
   return class PrivateStore {
-    constructor(lock, pvt) {
+    constructor(lock, pvt = {}) {
       return new Proxy(pvt, new Proxy({}, {
         data: {
           defaults: { //All other defaults are false
@@ -125,3 +145,30 @@ let PrivateStore = (() => {
 ```
 
 The `lock` parameter specifies the special key that the object will use to signal the enabling and disabling of access to the stored data. By default, access to the data is disabled. The property at this key is a boolean that cannot be read but can always be written.
+
+The `pvt` parameter specifies an object that either contains or will contain the initialization data. If the initialization process is separate from the creation of the PrivateStore, then this parameter is optional. The use of this parameter is dependent on the engine developer's design.
+
+## Behavior
+The behavior of a PrivateStore is such that except where explicitly defined to be otherwise, it behaves as a sealed ECMAScript Object with no properties and a null prototype. When a lexically defined class member function is run and that class defines private fields, an attempt to access a private field results in the following actions:
+
+* If the requested operation is not "get" and not "set", a TypeError is thrown.
+* The class that defined the function is retrieved from the functions Environment Record.
+* The class signature is retrieved from the class.
+* The PrivateStore key is retrieved from the class.
+* The PrivateStore key is used to retrieve the PrivateStore from the instance.
+* If the PrivateStore does not exist, a TypeError is thrown.
+* The class signature is used to unlock the PrivateStore.
+* If the unlock attempt fails, a TypeError is thrown.
+* The operation is completed normally with the PrivateStore as the target.
+* The class signature is used to lock the PrivateStore.
+* The return value of the requested operation is returned.
+
+During initialization of the PrivateStore, only the "defineProperty" operation is valid. The PrivateStore is unlocked at the beginning of the initialization and locked as the final step after all private member initializations are complete.
+
+#### Notes:
+* Since this process does not make use of instance internal slots, and internal slots on a constructor are not affected during construction even if the constructor is wrapped in a Proxy, this particular approach to handling private members results in fully encapsulated private data that does not rely on the identity of the owning instance, and therefore does not automatically preclude the use of Proxy in conjunction.
+* Though not part of this proposal, use of the PrivateStore exotic object may lead to an approach for allowing object literals to contain private members.
+* Since an instance's PrivateStore can only be unlocked inside of a function defined by a class that "constructed" the instance, it is not possible to accidentally unlock the PrivateStore.
+* Since each participating class defines its own PrivateStore, it is expected that an instance may have more than 1 PrivateStore. Each participating class' methods will only be able to access the PrivateStore it defined.
+* Since an instance may have more than 1 PrivateStore, a future proposal can be crafted to allow for "protected" support via a shared signature, privateKey, and PrivateStore. That is not part of this proposal.
+* Since the private store is neither configurable nor writable, it is not possible for a Proxy to replace the private store.
