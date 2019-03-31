@@ -172,3 +172,7 @@ During initialization of the PrivateStore, only the "defineProperty" operation i
 * Since each participating class defines its own PrivateStore, it is expected that an instance may have more than 1 PrivateStore. Each participating class' methods will only be able to access the PrivateStore it defined.
 * Since an instance may have more than 1 PrivateStore, a future proposal can be crafted to allow for "protected" support via a shared signature, privateKey, and PrivateStore. That is not part of this proposal.
 * Since the private store is neither configurable nor writable, it is not possible for a Proxy to replace the private store.
+
+## Examples:
+
+Because this is a change to internal behavior with no discernable changes to the enabling syntax, there are no code examples I can reasonably place in this README.md. However, the [example](/example) folder in this repo contains a fully functional implementation of the logic proposed. Barring a few differences, like the substitution of `$` for `#` (since class-fields support is required and the behavior of `#` is what this proposal seeks to remedy), this example should serve as a reasonable tool for helping to understand the potentially vague descriptions above.
