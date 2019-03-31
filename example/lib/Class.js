@@ -38,9 +38,11 @@ function getCleanStack(offset = 0) {
 }
 
 const Class = (() => {
+  const ClassSignature = Symbol();
   const signatures = new WeakMap;
   const frames = new WeakMap;
   const callStack = [];
+  const ctorStack = [];
 
   /**
    * Wraps a function with a wrapper that captures the call stack
@@ -54,7 +56,8 @@ const Class = (() => {
     let retval = function(...args) {
       frames.set(fn, getCleanStack(1))
       callStack.push(fn);
-      let retval = (construct) ? new fn(...args) : fn.call(this, ...args);
+      let retval = (construct) ? Reflect.construct(fn, args, new.target)
+                               : fn.call(this, ...args);
       callStack.pop();
       frames.delete(fn);
       return retval;
@@ -144,20 +147,24 @@ const Class = (() => {
       }
     }
 
-    const handler = new Proxy({}, {
+    const pHandler = new Proxy({}, {
       get(t, handler, r) {
         return (...args) => {
           let [target, prop] = args;
           let retval, clazz;
+          let constructing = ctorStack.length > 0;
 
-          if (prop && (typeof(prop) == "string") 
+          if ((handler == "has") && (prop === ClassSignature)) {
+            retval = true;
+          }
+          else if (!constructing && prop && (typeof(prop) == "string") 
                     && prop.length && (prop[0] == '$')) {
             //This is an access attempt on a private member!
             if (handler == "get")
               retval = void 0;
-            else
+              else
               retval = false;
-
+              
             /**
              * This is the ES equivalent of getting the [[ClassObject]] from
              * the environment record. Clumbsy though it may be, it should
@@ -219,23 +226,24 @@ const Class = (() => {
           throw new TypeError("Unsigned class encountered in the inheritance chain.");
         }
 
-        let retval;
+        let rval;
+        ctorStack.push(clazz);
         if (context) {
           Reflect.apply(target, context, args);
-          retval = context;
+          rval = context;
         }
         else {
-          retval = Reflect.construct(target, args, newTarget);
+          rval = Reflect.construct(target, args, newTarget);
         }
-
-        let members = Object.getOwnPropertyNames(retval);
+        
+        let members = Object.getOwnPropertyNames(rval);
         let pvtMembers = members.filter(key => key[0] == '$');
         let protMembers = members.filter(key => key[0] == '_');
-
-        let pvtInit = this.filter(retval, pvtMembers);
-        let protInit = this.filter(retval, protMembers);
-
-        Object.defineProperties(retval, {
+        
+        let pvtInit = this.filter(rval, pvtMembers);
+        let protInit = this.filter(rval, protMembers);
+        
+        Object.defineProperties(rval, {
           [pvtKey]: {
             value: new PrivateStore(sig, pvtInit)
           },
@@ -243,8 +251,9 @@ const Class = (() => {
             value: new PrivateStore(sig, protInit)
           }
         });
+        ctorStack.pop();
 
-        return new Proxy(retval, handler);
+        return new Proxy(rval, pHandler);
       },
       apply(target, context, args) {
         let retval;
@@ -262,16 +271,5 @@ const Class = (() => {
 
   return Class;
 })();
-
-/**
- * This is the complete list of every reasonably inheritable class 
- * in ES, plus Class and null. These base classes represent a stopping point
- * because its impossible for any of them to have inherited from Class.
- */
-const BaseClasses = Object.getOwnPropertyNames(global)
-                          .filter(name => /^[A-Z]\w+[a-z]$/.test(name) && 
-                                         (typeof(global[name]) == "function"))
-                          .map(name => global[name])
-                          .concat([Class, null]);
 
 module.exports = Class;
