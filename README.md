@@ -173,6 +173,9 @@ During initialization of the PrivateStore, only the "defineProperty" operation i
 * Since an instance may have more than 1 PrivateStore, a future proposal can be crafted to allow for "protected" support via a shared signature, privateKey, and PrivateStore. That is not part of this proposal.
 * Since the private store is neither configurable nor writable, it is not possible for a Proxy to replace the private store.
 
+## Integration with current proposal-class-fields
+The behavioral model above does not take anything from class-fields in to consideration. If the existing structure of class-fields is also considered, there is a method for removing the need for the PrivateStore to be an exotic object. In its place, an ordinary ES Object could be used as long as it is sealed immediately after creation of all private fields. Each private field would use a PrivateName from class-fields as its key. Since it would not be possible to proxy this object, this object is not the developer's class instance identity, and the object is sealed, it would always appear to be an empty object to any method that does not know the PrivateNames of the keys on the object.
+
 ## Examples:
 
 Because this is a change to internal behavior with no discernable changes to the enabling syntax, there are no code examples I can reasonably place in this README.md. However, the [example](/example) folder in this repo contains a fully functional implementation of the logic proposed. Barring a few differences, like the substitution of `$` for `#` (since class-fields support is required and the behavior of `#` is what this proposal seeks to remedy), this example should serve as a reasonable tool for helping to understand the potentially vague descriptions above.
