@@ -41,6 +41,7 @@ const Class = (() => {
   const ClassSignature = Symbol();
   const signatures = new WeakMap;
   const frames = new WeakMap;
+  const wrapMap = new WeakMap;
   const callStack = [];
   const ctorStack = [];
 
@@ -61,6 +62,10 @@ const Class = (() => {
       callStack.pop();
       frames.delete(fn);
       return retval;
+    }
+
+    if (construct) {
+      wrapMap.set(retval, fn);
     }
 
     //Mask the wrapper function to look like the original.
@@ -229,8 +234,8 @@ const Class = (() => {
         let rval;
         ctorStack.push(clazz);
         if (context) {
-          Reflect.apply(target, context, args);
-          rval = context;
+          rval = Reflect.apply(target, context, args);
+          rval = rval || context;
         }
         else {
           rval = Reflect.construct(target, args, newTarget);
@@ -257,7 +262,7 @@ const Class = (() => {
       },
       apply(target, context, args) {
         let retval;
-        if (clazz === target) {
+        if ([target, wrapMap.get(target)].includes(clazz)) {
           retval = this.construct(target, args, target, context);
         }
         else {
